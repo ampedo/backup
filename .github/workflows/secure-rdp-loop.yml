@@ -92,14 +92,32 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\ts.msi`"", "/quiet", "/norestart" -Wait
           Remove-Item "$env:TEMP\ts.msi" -Force
 
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up "--authkey=${{ secrets.TAILSCALE_AUTH_KEY }}" "--hostname=gh-runner-toolboxlap-${{ github.run_number }}" "--accept-routes"
+          # 1. Ensure service is awake
+          Start-Sleep -Seconds 5
+
+          # 2. Validate Secret Existence
+          $cleanKey = "${{ secrets.TAILSCALE_AUTH_KEY }}".Trim()
+          if (-not $cleanKey -or $cleanKey.Length -lt 10) {
+              Write-Error "❌ TAILSCALE_AUTH_KEY secret is empty or invalid! Please check Repository Secrets."
+              exit 1
+          }
+
+          # 3. Pass arguments cleanly via Array & enforce a 30-second timeout so it never hangs
+          $tsArgs = @(
+              "up",
+              "--authkey=$cleanKey",
+              "--hostname=gh-runner-toolboxlap-${{ github.run_number }}",
+              "--accept-routes",
+              "--timeout=30s"
+          )
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" @tsArgs
           
           $tsIP = $null; $r = 0
           while (-not $tsIP -and $r -lt 10) {
               $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
               Start-Sleep -Seconds 5; $r++
           }
-          if (-not $tsIP) { Write-Error "Network Fail"; exit 1 }
+          if (-not $tsIP) { Write-Error "❌ Network Fail: Could not fetch Tailscale IP."; exit 1 }
 
           # 📢 Printing Credentials and Brand Links (Perfect Output Layout)
           Write-Host "Address: $tsIP"
